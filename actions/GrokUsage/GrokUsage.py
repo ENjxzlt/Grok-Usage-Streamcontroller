@@ -59,8 +59,11 @@ LABEL_OUTLINE = {"outline_width": 2, "outline_color": [*XAI_INK, 190]}
 # its own, so this is a cheap way to avoid a jagged ring on the key.
 RING_CANVAS = 1024
 RING_OUTPUT = 256
-RING_THICKNESS = 90
-RING_INSET = 70
+# Sit around the center % only so the groove does not run under the top
+# "Grok" or bottom time-left labels. Keep the stroke modest so 10% and
+# 100% still fit in the hole.
+RING_THICKNESS = 72
+RING_INSET = 48
 RING_TRACK_COLOR = (*XAI_SLATE, 90)
 RING_OVERFLOW_COLOR = (*XAI_CRIMSON_DARK, 255)
 
@@ -449,6 +452,12 @@ class GrokUsage(ActionBase):
         if percent is not None:
             percent = round(float(percent))
             center_text = f"{percent}%"
+            if percent >= 100:
+                center_size = 15
+            elif percent >= 10:
+                center_size = 18
+            else:
+                center_size = 20
             if percent >= 90:
                 color = COLOR_CRIT
             elif percent >= 70:
@@ -457,10 +466,11 @@ class GrokUsage(ActionBase):
                 color = COLOR_OK
             # The ring itself already carries the status color, so leave the
             # key's tile background neutral instead of double-signalling.
-            self.set_media(image=render_ring_image(percent, color), size=0.97)
+            self.set_media(image=render_ring_image(percent, color), size=0.72)
             self.set_background_color(COLOR_NONE)
         else:
             center_text = "–"
+            center_size = 20
             self._set_static_icon()
             self.set_background_color(COLOR_NONE)
 
@@ -481,7 +491,7 @@ class GrokUsage(ActionBase):
             if remaining is not None:
                 bottom_text = self.tr("grok-usage.label.time-left").format(time=humanize_seconds(remaining))
 
-        self.set_center_label(text=center_text, font_size=20, **LABEL_OUTLINE)
+        self.set_center_label(text=center_text, font_size=center_size, **LABEL_OUTLINE)
         self.set_bottom_label(text=bottom_text, font_size=11, **LABEL_OUTLINE)
         return False
 
