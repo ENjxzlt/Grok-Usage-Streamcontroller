@@ -1,0 +1,20 @@
+{
+    "version": "1.0.0",
+    "thumbnail": "store/Thumbnail.png",
+    "id": "dev_enjxz_GrokUsage",
+    "name": "Grok Usage",
+    "github": "https://github.com/ENjxzlt/Grok-Usage-Streamcontroller",
+    "descriptions": {
+        "en_US": "Shows your Grok (xAI) API rate-limit usage on a key as a progress ring, powered by the x-ratelimit-* headers the xAI API returns.",
+        "de_DE": "Zeigt dein Grok (xAI) API-Ratenlimit als Fortschrittsring auf einer Taste an, auf Basis der x-ratelimit-*-Header der xAI-API."
+    },
+    "short-descriptions": {
+        "en_US": "Grok (xAI) API rate-limit usage",
+        "de_DE": "Grok (xAI) API-Ratenlimit"
+    },
+    "tags": ["Utility", "Productivity"],
+    "minimum-app-version": "1.5.0",
+    "app-version": "1.5.0-beta",
+    "description": "Shows your Grok (xAI) API rate-limit usage on a key as a progress ring, powered by the x-ratelimit-* headers the xAI API returns.",
+    "short-description": "Grok (xAI) API rate-limit usage"
+}

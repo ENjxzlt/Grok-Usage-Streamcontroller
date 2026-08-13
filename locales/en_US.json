@@ -1,0 +1,32 @@
+{
+    "plugin.name": "Grok Usage",
+    "actions.grok-usage.name": "Grok Usage",
+
+    "grok-usage.api-key.title": "xAI API key",
+    "grok-usage.api-key.subtitle": "From console.x.ai -> API Keys. Stored locally in this key's settings.",
+
+    "grok-usage.base-url.title": "API base URL",
+    "grok-usage.base-url.subtitle": "Only change this if you're using a proxy in front of the xAI API",
+
+    "grok-usage.model.title": "Model to probe",
+    "grok-usage.model.subtitle": "Rate limits are per model - pick the one you actually use, e.g. \"grok-4-fast\"",
+
+    "grok-usage.metric.title": "Ring metric",
+    "grok-usage.metric.subtitle": "Which rate limit to show as the percentage/ring: requests-per-window or tokens-per-window",
+    "grok-usage.metric.requests": "Requests",
+    "grok-usage.metric.tokens": "Tokens",
+
+    "grok-usage.refresh.title": "Refresh interval (seconds, min. 30)",
+    "grok-usage.refresh.subtitle": "Every refresh makes one tiny, real (paid) request against the xAI API - don't set this too low",
+
+    "grok-usage.show-remaining.title": "Show remaining count instead of reset time",
+    "grok-usage.show-remaining.subtitle": "Bottom label shows the raw remaining requests/tokens instead of the time left until the window resets",
+
+    "grok-usage.label.top": "Grok",
+    "grok-usage.label.loading": "…",
+    "grok-usage.label.no-key": "Set API key",
+    "grok-usage.label.error": "xAI API error",
+    "grok-usage.label.reset": "{time} left",
+    "grok-usage.label.requests-left": "{n} reqs left",
+    "grok-usage.label.tokens-left": "{n} tok left"
+}
