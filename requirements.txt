@@ -1,4 +1,4 @@
 # Everything else this plugin imports (gi/Gtk/Adw, loguru, StreamController's
-# own src.backend.* modules, urllib from the stdlib) is already provided by
-# StreamController itself.
+# own src.backend.* modules, subprocess/json/shlex from the stdlib) is
+# already provided by StreamController itself.
 Pillow

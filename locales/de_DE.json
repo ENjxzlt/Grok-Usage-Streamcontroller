@@ -2,31 +2,24 @@
     "plugin.name": "Grok-Nutzung",
     "actions.grok-usage.name": "Grok-Nutzung",
 
-    "grok-usage.api-key.title": "xAI-API-Schlüssel",
-    "grok-usage.api-key.subtitle": "Von console.x.ai -> API Keys. Wird lokal in den Einstellungen dieser Taste gespeichert.",
+    "grok-usage.log-path.title": "Grok-Build-Logdatei",
+    "grok-usage.log-path.subtitle": "Pfad zur unified.jsonl, die die Grok-Build-CLI schreibt",
 
-    "grok-usage.base-url.title": "API-Basis-URL",
-    "grok-usage.base-url.subtitle": "Nur ändern, wenn ein Proxy vor der xAI-API läuft",
+    "grok-usage.sessions-dir.title": "Grok-Build-Sessions-Verzeichnis",
+    "grok-usage.sessions-dir.subtitle": "Wird nur für die optionale Anzeige von Kosten/Tokens des letzten Turns unten verwendet",
 
-    "grok-usage.model.title": "Zu prüfendes Modell",
-    "grok-usage.model.subtitle": "Ratenlimits gelten pro Modell - wähle das, das du tatsächlich nutzt, z. B. \"grok-4-fast\"",
+    "grok-usage.secondary.title": "Untere Beschriftung",
+    "grok-usage.secondary.subtitle": "Was unter dem Prozentsatz angezeigt wird",
+    "grok-usage.secondary.reset": "Restzeit im Abrechnungszeitraum",
+    "grok-usage.secondary.cost": "Kosten des letzten Turns (ungefähr)",
+    "grok-usage.secondary.tokens": "Tokens des letzten Turns",
 
-    "grok-usage.metric.title": "Ring-Metrik",
-    "grok-usage.metric.subtitle": "Welches Ratenlimit als Prozentsatz/Ring angezeigt wird: Anfragen- oder Token-Kontingent pro Zeitfenster",
-    "grok-usage.metric.requests": "Anfragen",
-    "grok-usage.metric.tokens": "Tokens",
-
-    "grok-usage.refresh.title": "Aktualisierungsintervall (Sekunden, min. 30)",
-    "grok-usage.refresh.subtitle": "Jede Aktualisierung ist eine winzige, echte (kostenpflichtige) Anfrage an die xAI-API - nicht zu niedrig einstellen",
-
-    "grok-usage.show-remaining.title": "Verbleibende Anzahl statt Reset-Zeit anzeigen",
-    "grok-usage.show-remaining.subtitle": "Untere Beschriftung zeigt die rohe Anzahl verbleibender Anfragen/Tokens statt der Zeit bis zum Reset des Fensters",
+    "grok-usage.refresh.title": "Aktualisierungsintervall (Sekunden, min. 15)",
 
     "grok-usage.label.top": "Grok",
     "grok-usage.label.loading": "…",
-    "grok-usage.label.no-key": "API-Schlüssel setzen",
-    "grok-usage.label.error": "xAI-API-Fehler",
-    "grok-usage.label.reset": "{time} übrig",
-    "grok-usage.label.requests-left": "{n} Anfr. übrig",
-    "grok-usage.label.tokens-left": "{n} Tok. übrig"
+    "grok-usage.label.no-data": "Keine aktuellen Abrechnungsdaten",
+    "grok-usage.label.error": "Lesefehler",
+    "grok-usage.label.time-left": "{time} übrig",
+    "grok-usage.label.last-turn-tokens": "{tokens} letzter Turn"
 }

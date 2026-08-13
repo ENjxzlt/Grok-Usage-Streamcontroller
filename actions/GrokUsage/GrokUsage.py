@@ -1,9 +1,9 @@
 import json
 import os
-import re
+import shlex
+import subprocess
 import threading
-import urllib.error
-import urllib.request
+from datetime import datetime, timezone
 
 import gi
 from loguru import logger as log
@@ -19,12 +19,23 @@ from src.backend.PluginManager.ActionBase import ActionBase
 # Defaults & helpers
 # ---------------------------------------------------------------------------
 
-DEFAULT_BASE_URL = "https://api.x.ai/v1"
-DEFAULT_MODEL = "grok-4-fast"
-DEFAULT_METRIC = "requests"  # "requests" or "tokens"
+DEFAULT_LOG_PATH = "~/.grok/logs/unified.jsonl"
+DEFAULT_SESSIONS_DIR = "~/.grok/sessions"
+DEFAULT_SECONDARY = "reset"  # "reset" | "cost" | "tokens"
+_SECONDARY_OPTIONS = ("reset", "cost", "tokens")
 DEFAULT_REFRESH_SECONDS = 60
-MIN_REFRESH_SECONDS = 30
-REQUEST_TIMEOUT = 20
+MIN_REFRESH_SECONDS = 15
+COMMAND_TIMEOUT = 10
+
+BILLING_MSG = "billing: fetched credits config"
+
+# The billing entry can be far behind in a log that's been accumulating for
+# months, and a session's updates.jsonl can carry huge usage numbers per
+# line but each line is still only a few KB - these tail sizes comfortably
+# cover "the last few CLI invocations" without ever reading a multi-MB file
+# in full on every refresh.
+LOG_TAIL_BYTES = 262_144
+SESSION_TAIL_BYTES = 65_536
 
 # xAI's brand kit is deliberately monochrome (near-black / near-white, plus a
 # "Mine Shaft" gray accent - https://x.ai/legal/brand-guidelines) - there's
@@ -53,8 +64,6 @@ RING_INSET = 70
 RING_TRACK_COLOR = (*XAI_SLATE, 90)
 RING_OVERFLOW_COLOR = (*XAI_CRIMSON_DARK, 255)
 
-_DURATION_RE = re.compile(r"(\d+(?:\.\d+)?)(ms|s|m|h)")
-
 
 def render_ring_image(percent: float, color) -> "Image.Image":
     """
@@ -81,6 +90,10 @@ def render_ring_image(percent: float, color) -> "Image.Image":
     return img.resize((RING_OUTPUT, RING_OUTPUT), Image.LANCZOS)
 
 
+def is_in_flatpak() -> bool:
+    return os.path.isfile("/.flatpak-info")
+
+
 def humanize_tokens(n: int) -> str:
     if n >= 1_000_000:
         return f"{n / 1_000_000:.1f}M"
@@ -91,132 +104,153 @@ def humanize_tokens(n: int) -> str:
 
 def humanize_seconds(seconds: float) -> str:
     seconds = max(0, int(seconds))
-    hours, remainder = divmod(seconds, 3600)
+    days, remainder = divmod(seconds, 86400)
+    hours, remainder = divmod(remainder, 3600)
     minutes = remainder // 60
+    if days:
+        return f"{days}d {hours}h"
     if hours:
         return f"{hours}h {minutes}m"
-    return f"{minutes}m" if minutes else f"{seconds}s"
+    if minutes:
+        return f"{minutes}m"
+    return f"{seconds}s"
 
 
-def _parse_int_header(value):
-    if value is None:
-        return None
-    try:
-        return int(float(value))
-    except (TypeError, ValueError):
-        return None
-
-
-def _parse_reset_seconds(value):
+def _run_host_command(command: str, timeout: int = COMMAND_TIMEOUT):
     """
-    xAI's `x-ratelimit-reset-*` headers show up either as a plain number of
-    seconds ("6") or as a Go-style compound duration string ("1h2m3s",
-    "6m0s", "500ms"), mirroring the OpenAI-compatible header convention.
-    Handles both; returns None if the value is missing or unparseable.
+    Runs a shell command that reads from the Grok Build CLI's log files on
+    the *host*. StreamController is commonly distributed as a Flatpak,
+    which sandboxes the plugin process's filesystem view - `flatpak-spawn
+    --host` (the same mechanism the sibling Claude Usage plugin uses to
+    reach `ccusage`) runs the command on the host system instead, where
+    `~/.grok` actually lives.
     """
-    if not value:
-        return None
-    value = value.strip()
-    try:
-        return float(value)
-    except ValueError:
-        pass
+    if is_in_flatpak():
+        argv = ["flatpak-spawn", "--host", "bash", "-lc", command]
+    else:
+        argv = ["bash", "-lc", command]
 
-    total = 0.0
-    matched = False
-    for amount, unit in _DURATION_RE.findall(value):
-        matched = True
-        amount = float(amount)
-        if unit == "h":
-            total += amount * 3600
-        elif unit == "m":
-            total += amount * 60
-        elif unit == "ms":
-            total += amount / 1000
-        else:  # "s"
-            total += amount
-    return total if matched else None
-
-
-def _extract_error_message(body: str):
-    if not body:
-        return None
-    try:
-        payload = json.loads(body)
-    except (json.JSONDecodeError, TypeError):
-        return body[:200]
-    error = payload.get("error") if isinstance(payload, dict) else None
-    if isinstance(error, dict):
-        return error.get("message") or str(error)
-    if isinstance(error, str):
-        return error
-    return body[:200]
-
-
-def _has_rate_limit_headers(headers) -> bool:
-    return (
-        headers.get("x-ratelimit-remaining-requests") is not None
-        or headers.get("x-ratelimit-remaining-tokens") is not None
+    return subprocess.run(
+        argv,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        # Without an explicit cwd, the child inherits StreamController's
+        # sandbox-internal working directory (e.g. /app/bin/StreamController).
+        # flatpak-spawn --host then asks the host portal to chdir into that
+        # same path before running the command - which doesn't exist on the
+        # host, so the whole call fails with "Portal call failed: Failed to
+        # start command". Pin it to the user's home directory instead, which
+        # exists on both sides.
+        cwd=os.path.expanduser("~"),
     )
 
 
-def fetch_rate_limits(base_url: str, api_key: str, model: str, timeout: int = REQUEST_TIMEOUT) -> dict:
-    """
-    Sends a minimal (1 max-token) chat completion to `<base_url>/chat/completions`
-    and reads the `x-ratelimit-*` response headers, which xAI's API populates
-    on every inference call for the model's current request- and
-    token-per-window budget. There is no free/read-only endpoint for this -
-    every refresh is one tiny, real, billed request.
-
-    Raises RuntimeError if the request fails or the response carries no
-    rate-limit headers at all (bad API key, unknown model, ...).
-    """
-    url = base_url.rstrip("/") + "/chat/completions"
-    payload = json.dumps(
-        {
-            "model": model,
-            "messages": [{"role": "user", "content": "hi"}],
-            "max_tokens": 1,
-        }
-    ).encode("utf-8")
-    request = urllib.request.Request(
-        url,
-        data=payload,
-        method="POST",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-    )
-
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            headers = response.headers
-            response.read()
-    except urllib.error.HTTPError as e:
-        headers = e.headers
+def _find_latest_billing_entry(text: str):
+    """Scans a chunk of unified.jsonl (newest lines last) for the most
+    recent "billing: fetched credits config" entry."""
+    for line in reversed(text.splitlines()):
+        line = line.strip()
+        if not line or BILLING_MSG not in line:
+            continue
         try:
-            body = e.read().decode("utf-8", "replace")
-        except Exception:  # noqa: BLE001 - best-effort error body
-            body = ""
-        if not _has_rate_limit_headers(headers):
-            raise RuntimeError(_extract_error_message(body) or f"HTTP {e.code}") from e
-    except urllib.error.URLError as e:
-        raise RuntimeError(str(e.reason)) from e
-    except TimeoutError as e:
-        raise RuntimeError("request timed out") from e
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if obj.get("msg") != BILLING_MSG:
+            continue
 
-    if not _has_rate_limit_headers(headers):
-        raise RuntimeError("response had no rate-limit headers - check the model name")
+        ctx = obj.get("ctx") or {}
+        config = ctx.get("config") or {}
+        period = config.get("currentPeriod") or {}
+        return {
+            "percent": config.get("creditUsagePercent"),
+            "period_end": period.get("end") or config.get("billingPeriodEnd"),
+            "tier": ctx.get("subscriptionTier"),
+        }
+    return None
 
-    return {
-        "limit_requests": _parse_int_header(headers.get("x-ratelimit-limit-requests")),
-        "remaining_requests": _parse_int_header(headers.get("x-ratelimit-remaining-requests")),
-        "reset_requests": _parse_reset_seconds(headers.get("x-ratelimit-reset-requests")),
-        "limit_tokens": _parse_int_header(headers.get("x-ratelimit-limit-tokens")),
-        "remaining_tokens": _parse_int_header(headers.get("x-ratelimit-remaining-tokens")),
-        "reset_tokens": _parse_reset_seconds(headers.get("x-ratelimit-reset-tokens")),
-    }
+
+def _find_latest_usage_entry(text: str):
+    """Scans a chunk of a session's updates.jsonl (newest lines last) for
+    the most recent completed turn's usage object."""
+    for line in reversed(text.splitlines()):
+        line = line.strip()
+        if not line or "turn_completed" not in line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        update = ((obj.get("params") or {}).get("update")) or {}
+        if update.get("sessionUpdate") != "turn_completed":
+            continue
+        usage = update.get("usage")
+        if usage:
+            return usage
+    return None
+
+
+def fetch_billing_status(log_path: str, tail_bytes: int = LOG_TAIL_BYTES):
+    """
+    Tails the Grok Build CLI's unified log for the most recent "billing:
+    fetched credits config" entry, which the CLI writes every time it
+    refreshes its quota. This log format is unofficial - reverse-engineered
+    from a real log sample, not documented by xAI - so it may need updating
+    if a future Grok Build release changes its logging.
+
+    Returns None (not an error) if the log exists but has no such entry
+    within the tail window - e.g. Grok Build just hasn't been run recently
+    enough for one to still be in range. Raises RuntimeError only for
+    genuine read failures (missing file, permissions, timeout, ...).
+    """
+    proc = _run_host_command(f"tail -c {tail_bytes} {shlex.quote(log_path)}")
+    if proc.returncode != 0:
+        message = proc.stderr.strip() or f"could not read {log_path}"
+        raise RuntimeError(message)
+    return _find_latest_billing_entry(proc.stdout)
+
+
+def fetch_last_turn_usage(sessions_dir: str):
+    """
+    Finds the most recently modified `updates.jsonl` under the Grok Build
+    sessions directory and returns its latest completed turn's usage
+    object, or None if anything about this lookup fails - it's a purely
+    optional, best-effort secondary data point, so failures here should
+    never turn the key red the way a `fetch_billing_status` failure does.
+    """
+    quoted_dir = shlex.quote(sessions_dir)
+    find_command = (
+        f"find {quoted_dir} -type f -name updates.jsonl -printf '%T@ %p\\n' "
+        "2>/dev/null | sort -rn | head -n1 | cut -d' ' -f2-"
+    )
+    try:
+        find_proc = _run_host_command(find_command)
+    except Exception:  # noqa: BLE001 - best-effort, never fatal
+        return None
+
+    latest_file = find_proc.stdout.strip()
+    if find_proc.returncode != 0 or not latest_file:
+        return None
+
+    try:
+        tail_proc = _run_host_command(f"tail -c {SESSION_TAIL_BYTES} {shlex.quote(latest_file)}")
+    except Exception:  # noqa: BLE001 - best-effort, never fatal
+        return None
+    if tail_proc.returncode != 0:
+        return None
+
+    return _find_latest_usage_entry(tail_proc.stdout)
+
+
+def _seconds_until(iso_timestamp: str | None):
+    if not iso_timestamp:
+        return None
+    try:
+        end_dt = datetime.fromisoformat(iso_timestamp.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return (end_dt - datetime.now(timezone.utc)).total_seconds()
 
 
 # ---------------------------------------------------------------------------
@@ -247,7 +281,7 @@ class GrokUsage(ActionBase):
 
     def _set_static_icon(self):
         """Falls back to the plain plugin icon when there's no ring to draw
-        (missing API key, error, or a metric xAI didn't return headers for)."""
+        (error, or no billing entry found yet)."""
         icon_path = os.path.join(self.plugin_base.PATH, "assets", "icon.png")
         if os.path.isfile(icon_path):
             self.set_media(media_path=icon_path, size=0.55, valign=-0.65)
@@ -256,8 +290,7 @@ class GrokUsage(ActionBase):
         self._stop_event.set()
 
     def on_key_down(self):
-        # Manual refresh on key press, without waiting for the timer. Like
-        # every refresh, this makes one tiny real request against the xAI API.
+        # Manual refresh on key press, without waiting for the timer.
         threading.Thread(
             target=self._refresh_once, daemon=True, name="GrokUsage-manual-refresh"
         ).start()
@@ -271,83 +304,58 @@ class GrokUsage(ActionBase):
 
     def _settings(self) -> dict:
         settings = self.get_settings()
-        settings.setdefault("api_key", "")
-        settings.setdefault("base_url", DEFAULT_BASE_URL)
-        settings.setdefault("model", DEFAULT_MODEL)
-        settings.setdefault("metric", DEFAULT_METRIC)
+        settings.setdefault("log_path", DEFAULT_LOG_PATH)
+        settings.setdefault("sessions_dir", DEFAULT_SESSIONS_DIR)
+        settings.setdefault("secondary", DEFAULT_SECONDARY)
         settings.setdefault("refresh_seconds", DEFAULT_REFRESH_SECONDS)
-        settings.setdefault("show_remaining", False)
         self.set_settings(settings)
         return settings
 
     def get_config_rows(self) -> list:
         settings = self._settings()
 
-        # AdwPasswordEntryRow (masked input with a visibility toggle) has
-        # been part of libadwaita since 1.2. Fall back to a plain EntryRow
-        # on an older runtime instead of failing to load the whole plugin.
-        password_row_cls = getattr(Adw, "PasswordEntryRow", None) or Adw.EntryRow
-        api_key_row = password_row_cls(
-            title=self.tr("grok-usage.api-key.title"),
-            subtitle=self.tr("grok-usage.api-key.subtitle"),
+        log_path_row = Adw.EntryRow(
+            title=self.tr("grok-usage.log-path.title"), subtitle=self.tr("grok-usage.log-path.subtitle")
         )
-        api_key_row.set_text(str(settings.get("api_key", "")))
-        api_key_row.connect("notify::text", self._on_api_key_changed)
+        log_path_row.set_text(str(settings.get("log_path", DEFAULT_LOG_PATH)))
+        log_path_row.connect("notify::text", self._on_log_path_changed)
 
-        base_url_row = Adw.EntryRow(title=self.tr("grok-usage.base-url.title"))
-        base_url_row.set_text(str(settings.get("base_url", DEFAULT_BASE_URL)))
-        base_url_row.connect("notify::text", self._on_base_url_changed)
-
-        model_row = Adw.EntryRow(title=self.tr("grok-usage.model.title"))
-        model_row.set_text(str(settings.get("model", DEFAULT_MODEL)))
-        model_row.connect("notify::text", self._on_model_changed)
-
-        metric_row = Adw.ComboRow(
-            title=self.tr("grok-usage.metric.title"),
-            subtitle=self.tr("grok-usage.metric.subtitle"),
+        sessions_dir_row = Adw.EntryRow(
+            title=self.tr("grok-usage.sessions-dir.title"), subtitle=self.tr("grok-usage.sessions-dir.subtitle")
         )
-        metric_options = Gtk.StringList()
-        metric_options.append(self.tr("grok-usage.metric.requests"))
-        metric_options.append(self.tr("grok-usage.metric.tokens"))
-        metric_row.set_model(metric_options)
-        metric_row.set_selected(1 if settings.get("metric") == "tokens" else 0)
-        metric_row.connect("notify::selected", self._on_metric_changed)
+        sessions_dir_row.set_text(str(settings.get("sessions_dir", DEFAULT_SESSIONS_DIR)))
+        sessions_dir_row.connect("notify::text", self._on_sessions_dir_changed)
 
-        refresh_row = Adw.EntryRow(title=self.tr("grok-usage.refresh.title"), subtitle=self.tr("grok-usage.refresh.subtitle"))
+        secondary_row = Adw.ComboRow(
+            title=self.tr("grok-usage.secondary.title"), subtitle=self.tr("grok-usage.secondary.subtitle")
+        )
+        secondary_options = Gtk.StringList()
+        secondary_options.append(self.tr("grok-usage.secondary.reset"))
+        secondary_options.append(self.tr("grok-usage.secondary.cost"))
+        secondary_options.append(self.tr("grok-usage.secondary.tokens"))
+        secondary_row.set_model(secondary_options)
+        secondary_row.set_selected(_SECONDARY_OPTIONS.index(settings.get("secondary", DEFAULT_SECONDARY)))
+        secondary_row.connect("notify::selected", self._on_secondary_changed)
+
+        refresh_row = Adw.EntryRow(title=self.tr("grok-usage.refresh.title"))
         refresh_row.set_text(str(settings.get("refresh_seconds", DEFAULT_REFRESH_SECONDS)))
         refresh_row.connect("notify::text", self._on_refresh_changed)
 
-        remaining_row = Adw.ActionRow(
-            title=self.tr("grok-usage.show-remaining.title"),
-            subtitle=self.tr("grok-usage.show-remaining.subtitle"),
-        )
-        remaining_switch = Gtk.Switch(
-            active=bool(settings.get("show_remaining", False)), valign=Gtk.Align.CENTER
-        )
-        remaining_switch.connect("notify::active", self._on_show_remaining_changed)
-        remaining_row.add_suffix(remaining_switch)
-        remaining_row.set_activatable_widget(remaining_switch)
+        return [log_path_row, sessions_dir_row, secondary_row, refresh_row]
 
-        return [api_key_row, base_url_row, model_row, metric_row, refresh_row, remaining_row]
-
-    def _on_api_key_changed(self, entry, _):
+    def _on_log_path_changed(self, entry, _):
         settings = self.get_settings()
-        settings["api_key"] = entry.get_text().strip()
+        settings["log_path"] = entry.get_text().strip() or DEFAULT_LOG_PATH
         self.set_settings(settings)
 
-    def _on_base_url_changed(self, entry, _):
+    def _on_sessions_dir_changed(self, entry, _):
         settings = self.get_settings()
-        settings["base_url"] = entry.get_text().strip() or DEFAULT_BASE_URL
+        settings["sessions_dir"] = entry.get_text().strip() or DEFAULT_SESSIONS_DIR
         self.set_settings(settings)
 
-    def _on_model_changed(self, entry, _):
+    def _on_secondary_changed(self, row, _):
         settings = self.get_settings()
-        settings["model"] = entry.get_text().strip() or DEFAULT_MODEL
-        self.set_settings(settings)
-
-    def _on_metric_changed(self, row, _):
-        settings = self.get_settings()
-        settings["metric"] = "tokens" if row.get_selected() == 1 else "requests"
+        settings["secondary"] = _SECONDARY_OPTIONS[row.get_selected()]
         self.set_settings(settings)
 
     def _on_refresh_changed(self, entry, _):
@@ -355,11 +363,6 @@ class GrokUsage(ActionBase):
         settings["refresh_seconds"] = _parse_int(
             entry.get_text(), DEFAULT_REFRESH_SECONDS, minimum=MIN_REFRESH_SECONDS
         )
-        self.set_settings(settings)
-
-    def _on_show_remaining_changed(self, switch, _):
-        settings = self.get_settings()
-        settings["show_remaining"] = switch.get_active()
         self.set_settings(settings)
 
     # ------------------------------------------------------------------ #
@@ -386,34 +389,28 @@ class GrokUsage(ActionBase):
 
     def _refresh_once(self):
         settings = self._settings()
-        api_key = str(settings.get("api_key", "")).strip()
-        if not api_key:
-            GLib.idle_add(self._render_no_key)
-            return
+        log_path = os.path.expanduser(str(settings.get("log_path", DEFAULT_LOG_PATH)))
+        secondary = settings.get("secondary", DEFAULT_SECONDARY)
 
-        base_url = settings.get("base_url", DEFAULT_BASE_URL)
-        model = settings.get("model", DEFAULT_MODEL)
         try:
-            data = fetch_rate_limits(base_url, api_key, model)
+            billing = fetch_billing_status(log_path)
             error = None
         except Exception as e:  # noqa: BLE001 - surface any failure on the key
-            data = None
+            billing = None
             error = str(e)
 
-        GLib.idle_add(self._render, data, error, settings)
+        usage = None
+        if error is None and billing is not None and secondary in ("cost", "tokens"):
+            sessions_dir = os.path.expanduser(str(settings.get("sessions_dir", DEFAULT_SESSIONS_DIR)))
+            usage = fetch_last_turn_usage(sessions_dir)
+
+        GLib.idle_add(self._render, billing, usage, error, settings)
 
     # ------------------------------------------------------------------ #
     # Rendering
     # ------------------------------------------------------------------ #
 
-    def _render_no_key(self):
-        self._set_static_icon()
-        self.set_center_label(text="–", font_size=22, **LABEL_OUTLINE)
-        self.set_bottom_label(text=self.tr("grok-usage.label.no-key"), font_size=10, **LABEL_OUTLINE)
-        self.set_background_color(COLOR_NONE)
-        return False
-
-    def _render(self, data, error, settings):
+    def _render(self, billing, usage, error, settings):
         if error is not None:
             self._set_static_icon()
             self.set_center_label(text="!", font_size=22, **LABEL_OUTLINE)
@@ -422,25 +419,16 @@ class GrokUsage(ActionBase):
             log.error(f"[GrokUsage] {error}")
             return False
 
-        metric = settings.get("metric", DEFAULT_METRIC)
-        show_remaining = bool(settings.get("show_remaining", False))
+        if billing is None:
+            self._set_static_icon()
+            self.set_center_label(text="–", font_size=22, **LABEL_OUTLINE)
+            self.set_bottom_label(text=self.tr("grok-usage.label.no-data"), font_size=10, **LABEL_OUTLINE)
+            self.set_background_color(COLOR_NONE)
+            return False
 
-        if metric == "tokens":
-            limit, remaining, reset_seconds = (
-                data.get("limit_tokens"),
-                data.get("remaining_tokens"),
-                data.get("reset_tokens"),
-            )
-        else:
-            limit, remaining, reset_seconds = (
-                data.get("limit_requests"),
-                data.get("remaining_requests"),
-                data.get("reset_requests"),
-            )
-
-        if limit and remaining is not None:
-            used = max(0, limit - remaining)
-            percent = round((used / limit) * 100)
+        percent = billing.get("percent")
+        if percent is not None:
+            percent = round(float(percent))
             center_text = f"{percent}%"
             if percent >= 90:
                 color = COLOR_CRIT
@@ -453,19 +441,26 @@ class GrokUsage(ActionBase):
             self.set_media(image=render_ring_image(percent, color), size=0.97)
             self.set_background_color(COLOR_NONE)
         else:
-            # xAI didn't return headers for the selected metric - fall back
-            # to whatever raw number is available instead of a blank key.
-            center_text = humanize_tokens(remaining) if remaining is not None else "–"
+            center_text = "–"
             self._set_static_icon()
             self.set_background_color(COLOR_NONE)
 
-        if show_remaining and remaining is not None:
-            key = "grok-usage.label.tokens-left" if metric == "tokens" else "grok-usage.label.requests-left"
-            bottom_text = self.tr(key).format(n=humanize_tokens(remaining))
-        elif reset_seconds is not None:
-            bottom_text = self.tr("grok-usage.label.reset").format(time=humanize_seconds(reset_seconds))
+        secondary = settings.get("secondary", DEFAULT_SECONDARY)
+        bottom_text = ""
+        if secondary == "cost" and usage and usage.get("costUsdTicks") is not None:
+            # costUsdTicks' unit isn't documented anywhere - this assumes
+            # nanodollars (1e9 ticks = $1), inferred from the sample value
+            # in the GitHub issue that requested this plugin. Flag it if it
+            # ever looks obviously wrong for your account.
+            bottom_text = f"${usage['costUsdTicks'] / 1_000_000_000:.2f}"
+        elif secondary == "tokens" and usage and usage.get("totalTokens") is not None:
+            bottom_text = self.tr("grok-usage.label.last-turn-tokens").format(
+                tokens=humanize_tokens(int(usage["totalTokens"]))
+            )
         else:
-            bottom_text = ""
+            remaining = _seconds_until(billing.get("period_end"))
+            if remaining is not None:
+                bottom_text = self.tr("grok-usage.label.time-left").format(time=humanize_seconds(remaining))
 
         self.set_center_label(text=center_text, font_size=20, **LABEL_OUTLINE)
         self.set_bottom_label(text=bottom_text, font_size=11, **LABEL_OUTLINE)

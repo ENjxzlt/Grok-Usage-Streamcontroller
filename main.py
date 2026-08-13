@@ -1,11 +1,11 @@
 """
 Grok Usage - StreamController plugin
 
-Shows the current Grok (xAI) API rate-limit usage on a Stream Deck key:
-percentage of your per-model requests-per-window or tokens-per-window
-budget used, plus the time remaining until that window resets. Powered by
-the `x-ratelimit-*` response headers the xAI API (api.x.ai) returns on
-every inference call.
+Shows your Grok Build CLI subscription usage on a Stream Deck key: the
+current billing period's credit-usage percentage (read straight from the
+CLI's own local log, same number Grok Build itself uses), plus the time
+remaining until that period resets. Optionally shows the last turn's token
+count or approximate cost instead, from the CLI's session logs.
 """
 
 from src.backend.PluginManager.PluginBase import PluginBase
