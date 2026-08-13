@@ -20,7 +20,7 @@ It works by tailing the Grok Build CLI's own local log (`~/.grok/logs/unified.js
 - If the log file has no recent billing entry, the key shows a neutral "No recent billing data" state instead of erroring
 - Pressing the key forces an immediate refresh
 
-> **Note on accuracy:** the percentage comes straight from Grok Build's own billing check, so it should match what the CLI shows you. The optional last-turn cost figure is a guess, though: `costUsdTicks`' unit isn't documented, so this assumes 1,000,000,000 ticks = $1 (inferred from the sample value in the originating issue) — treat it as approximate.
+> **Note on accuracy:** the percentage comes straight from Grok Build's own billing check, so it should match what the CLI shows you. That said, `creditUsagePercent` itself is only present once there's something to report — a billing period with zero usage so far (confirmed on a fresh Free-tier account) omits the field entirely instead of sending `0`. The plugin treats that specific case (`historyLen: 0`) as a genuine 0% rather than leaving the ring blank; any other case where the field is missing falls back to a neutral "–" instead of guessing. The optional last-turn cost figure is a guess, though: `costUsdTicks`' unit isn't documented, so this assumes 1,000,000,000 ticks = $1 (inferred from the sample value in the originating issue) — treat it as approximate.
 
 ## Requirements
 

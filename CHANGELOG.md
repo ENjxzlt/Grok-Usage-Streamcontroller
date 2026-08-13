@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.1
+
+- Fixed the ring/percentage silently not showing on accounts where `creditUsagePercent` is absent from the billing entry (observed on a fresh Free-tier account with zero usage so far, where xAI's API omits the field entirely instead of sending `0`). Now inferred as 0% specifically when `historyLen` is `0`; still falls back to a neutral state for any other case where the field is genuinely missing.
+
 ## 1.0.0
 
 - Initial release: shows the current billing period's `creditUsagePercent` (as reported by the Grok Build CLI itself) as a progress ring, plus time remaining until the period resets — refreshed on an interval and on key press.

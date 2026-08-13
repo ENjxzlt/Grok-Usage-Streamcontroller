@@ -146,6 +146,25 @@ def _run_host_command(command: str, timeout: int = COMMAND_TIMEOUT):
     )
 
 
+def _infer_percent(config: dict):
+    """
+    `creditUsagePercent` turns out to only be present once xAI's billing
+    service actually has something to report - a brand-new billing period
+    (or any account, Free tier included, that hasn't sent a single request
+    yet) omits the field entirely instead of sending `0`. `historyLen` is
+    present either way and is the cheapest signal that nothing has
+    happened yet, so treat *that* specific case as a genuine 0% instead of
+    leaving the ring blank. Any other case where the field is missing is
+    left as "unknown" (None) rather than guessing a number.
+    """
+    percent = config.get("creditUsagePercent")
+    if percent is not None:
+        return percent
+    if config.get("historyLen") == 0:
+        return 0.0
+    return None
+
+
 def _find_latest_billing_entry(text: str):
     """Scans a chunk of unified.jsonl (newest lines last) for the most
     recent "billing: fetched credits config" entry."""
@@ -164,7 +183,7 @@ def _find_latest_billing_entry(text: str):
         config = ctx.get("config") or {}
         period = config.get("currentPeriod") or {}
         return {
-            "percent": config.get("creditUsagePercent"),
+            "percent": _infer_percent(config),
             "period_end": period.get("end") or config.get("billingPeriodEnd"),
             "tier": ctx.get("subscriptionTier"),
         }
