@@ -1,0 +1,33 @@
+# Notifies the official StreamController-Store repo whenever this plugin's
+# main branch is updated, so it can pick up new releases.
+#
+# This only works after the plugin has been accepted into the store and you
+# have a STORE_AUTOMATION_TOKEN configured under this repo's Settings ->
+# Secrets and variables -> Actions. Until then this workflow will just fail
+# on push, which is expected and harmless - the plugin still installs and
+# runs fine without it.
+name: Notify Store
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Store Update
+        run: |
+          curl -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.STORE_AUTOMATION_TOKEN }}" \
+            https://api.github.com/repos/StreamController/StreamController-Store/dispatches \
+            -d '{
+              "event_type": "plugin_updated",
+              "client_payload": {
+                "repo_url": "https://github.com/${{ github.repository }}",
+                "version": "${{ github.ref_name }}",
+                "commit_sha": "${{ github.sha }}"
+              }
+            }'

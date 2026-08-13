@@ -1,0 +1,25 @@
+{
+    "plugin.name": "Grok-Nutzung",
+    "actions.grok-usage.name": "Grok-Nutzung",
+
+    "grok-usage.log-path.title": "Grok-Build-Logdatei",
+    "grok-usage.log-path.subtitle": "Pfad zur unified.jsonl, die die Grok-Build-CLI schreibt",
+
+    "grok-usage.sessions-dir.title": "Grok-Build-Sessions-Verzeichnis",
+    "grok-usage.sessions-dir.subtitle": "Wird nur für die optionale Anzeige von Kosten/Tokens des letzten Turns unten verwendet",
+
+    "grok-usage.secondary.title": "Untere Beschriftung",
+    "grok-usage.secondary.subtitle": "Was unter dem Prozentsatz angezeigt wird",
+    "grok-usage.secondary.reset": "Restzeit im Abrechnungszeitraum",
+    "grok-usage.secondary.cost": "Kosten des letzten Turns (ungefähr)",
+    "grok-usage.secondary.tokens": "Tokens des letzten Turns",
+
+    "grok-usage.refresh.title": "Aktualisierungsintervall (Sekunden, min. 15)",
+
+    "grok-usage.label.top": "Grok",
+    "grok-usage.label.loading": "…",
+    "grok-usage.label.no-data": "Keine aktuellen Abrechnungsdaten",
+    "grok-usage.label.error": "Lesefehler",
+    "grok-usage.label.time-left": "{time} übrig",
+    "grok-usage.label.last-turn-tokens": "{tokens} letzter Turn"
+}

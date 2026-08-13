@@ -1,0 +1,1 @@
+Thumbnail.png is a copy of assets/icon.png, created for this project (procedurally generated with Pillow) and licensed under the same GPL-3.0 license as the plugin itself.

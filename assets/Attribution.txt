@@ -1,0 +1,1 @@
+icon.png was created for this project (procedurally generated with Pillow) and is licensed under the same GPL-3.0 license as the plugin itself.
