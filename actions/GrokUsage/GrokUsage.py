@@ -61,7 +61,10 @@ RING_CANVAS = 1024
 RING_OUTPUT = 256
 RING_THICKNESS = 90
 RING_INSET = 70
-RING_TRACK_COLOR = (*XAI_SLATE, 90)
+# Mine Shaft (XAI_SLATE @ 90) composites to ~RGB 17 on a black Stream Deck
+# tile and the unused groove vanishes. Paper at ~160 stays monochrome and
+# reads as a full circle; fill is still opaque 255 so used % stays brighter.
+RING_TRACK_COLOR = (*XAI_PAPER, 160)
 RING_OVERFLOW_COLOR = (*XAI_CRIMSON_DARK, 255)
 
 
