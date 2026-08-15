@@ -148,21 +148,13 @@ def _run_host_command(command: str, timeout: int = COMMAND_TIMEOUT):
 
 def _infer_percent(config: dict):
     """
-    `creditUsagePercent` turns out to only be present once xAI's billing
-    service actually has something to report - a brand-new billing period
-    (or any account, Free tier included, that hasn't sent a single request
-    yet) omits the field entirely instead of sending `0`. `historyLen` is
-    present either way and is the cheapest signal that nothing has
-    happened yet, so treat *that* specific case as a genuine 0% instead of
-    leaving the ring blank. Any other case where the field is missing is
-    left as "unknown" (None) rather than guessing a number.
+    Return `creditUsagePercent` only when xAI sent it. Do not infer 0%
+    from `historyLen` — that field is 0 even on SuperGrok lines that also
+    had 25% / 52%. A missing key is handled at render time: if we still
+    have a billing period, the key shows an empty ring + 0% (under the
+    ~1% report bar); if we have no billing row at all, the G icon.
     """
-    percent = config.get("creditUsagePercent")
-    if percent is not None:
-        return percent
-    if config.get("historyLen") == 0:
-        return 0.0
-    return None
+    return config.get("creditUsagePercent")
 
 
 def _find_latest_billing_entry(text: str):
@@ -440,29 +432,30 @@ class GrokUsage(ActionBase):
 
         if billing is None:
             self._set_static_icon()
-            self.set_center_label(text="–", font_size=22, **LABEL_OUTLINE)
+            self.set_center_label(text="", font_size=22, **LABEL_OUTLINE)
             self.set_bottom_label(text=self.tr("grok-usage.label.no-data"), font_size=10, **LABEL_OUTLINE)
             self.set_background_color(COLOR_NONE)
             return False
 
         percent = billing.get("percent")
-        if percent is not None:
-            percent = round(float(percent))
-            center_text = f"{percent}%"
-            if percent >= 90:
-                color = COLOR_CRIT
-            elif percent >= 70:
-                color = COLOR_WARN
-            else:
-                color = COLOR_OK
-            # The ring itself already carries the status color, so leave the
-            # key's tile background neutral instead of double-signalling.
-            self.set_media(image=render_ring_image(percent, color), size=0.97)
-            self.set_background_color(COLOR_NONE)
+        if percent is None:
+            # Period is known but xAI omitted the field (typical until ~1%).
+            # Empty ring + 0% matches the normal key; do not use the G icon
+            # or a "–" overlay.
+            percent = 0
         else:
-            center_text = "–"
-            self._set_static_icon()
-            self.set_background_color(COLOR_NONE)
+            percent = round(float(percent))
+        center_text = f"{percent}%"
+        if percent >= 90:
+            color = COLOR_CRIT
+        elif percent >= 70:
+            color = COLOR_WARN
+        else:
+            color = COLOR_OK
+        # The ring itself already carries the status color, so leave the
+        # key's tile background neutral instead of double-signalling.
+        self.set_media(image=render_ring_image(percent, color), size=0.97)
+        self.set_background_color(COLOR_NONE)
 
         secondary = settings.get("secondary", DEFAULT_SECONDARY)
         bottom_text = ""
