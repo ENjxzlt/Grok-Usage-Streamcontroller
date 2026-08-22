@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.2
+
+Real-world fixes from [@parkour86](https://github.com/parkour86) testing against actual Grok Build/SuperGrok installs ([#3](https://github.com/ENjxzlt/Grok-Usage-Streamcontroller/issues/3), [#4](https://github.com/ENjxzlt/Grok-Usage-Streamcontroller/pull/4), [#5](https://github.com/ENjxzlt/Grok-Usage-Streamcontroller/pull/5), [#6](https://github.com/ENjxzlt/Grok-Usage-Streamcontroller/pull/6)):
+
+- **Fixed a wrong 0% inference introduced in 1.0.1.** `historyLen` is not a usage signal — on SuperGrok it's `0` even on billing lines carrying a real `creditUsagePercent` (confirmed against 448/448 entries in a real log). `_infer_percent` now returns `creditUsagePercent` as-is (or `None`); the key shows an empty ring + `0%` whenever a billing period is known but xAI hasn't reported a percent yet (which, per the same log evidence, means "under ~1%", not "no data") — same visual, correct reasoning.
+- **Fixed the unused ring track being invisible on black Stream Deck keys.** It composited to near-black; switched from a dark slate track to a pale, translucent one so the full circle reads correctly, with the used arc still fully opaque so it stays visually brighter.
+- **Shrunk the ring** (media size 0.97 → 0.72, stroke 90 → 72, inset 70 → 48) so it sits around the percentage instead of running underneath the top/bottom labels, with a tiered center font size (20/18/15pt) so 100% still fits.
+
 ## 1.0.1
 
 - Fixed the ring/percentage silently not showing on accounts where `creditUsagePercent` is absent from the billing entry (observed on a fresh Free-tier account with zero usage so far, where xAI's API omits the field entirely instead of sending `0`). Now inferred as 0% specifically when `historyLen` is `0`; still falls back to a neutral state for any other case where the field is genuinely missing.
