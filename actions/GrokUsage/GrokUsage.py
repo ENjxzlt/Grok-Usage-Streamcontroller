@@ -59,8 +59,12 @@ LABEL_OUTLINE = {"outline_width": 2, "outline_color": [*XAI_INK, 190]}
 # its own, so this is a cheap way to avoid a jagged ring on the key.
 RING_CANVAS = 1024
 RING_OUTPUT = 256
-RING_THICKNESS = 90
-RING_INSET = 70
+# Sit around the center % only so the groove does not run under the top
+# "Grok" or bottom time-left labels (it used to be drawn at 97% of the key
+# and ran straight under both). Keep the stroke modest so 10% and 100%
+# still fit in the hole.
+RING_THICKNESS = 72
+RING_INSET = 48
 # Mine Shaft (XAI_SLATE @ 90) composites to ~RGB 17 on a black Stream Deck
 # tile and the unused groove vanishes. Paper at ~160 stays monochrome and
 # reads as a full circle; fill is still opaque 255 so used % stays brighter.
@@ -449,6 +453,13 @@ class GrokUsage(ActionBase):
         else:
             percent = round(float(percent))
         center_text = f"{percent}%"
+        # Wider text needs a smaller font to still fit inside the ring's hole.
+        if percent >= 100:
+            center_size = 15
+        elif percent >= 10:
+            center_size = 18
+        else:
+            center_size = 20
         if percent >= 90:
             color = COLOR_CRIT
         elif percent >= 70:
@@ -457,7 +468,7 @@ class GrokUsage(ActionBase):
             color = COLOR_OK
         # The ring itself already carries the status color, so leave the
         # key's tile background neutral instead of double-signalling.
-        self.set_media(image=render_ring_image(percent, color), size=0.97)
+        self.set_media(image=render_ring_image(percent, color), size=0.72)
         self.set_background_color(COLOR_NONE)
 
         secondary = settings.get("secondary", DEFAULT_SECONDARY)
@@ -477,7 +488,7 @@ class GrokUsage(ActionBase):
             if remaining is not None:
                 bottom_text = self.tr("grok-usage.label.time-left").format(time=humanize_seconds(remaining))
 
-        self.set_center_label(text=center_text, font_size=20, **LABEL_OUTLINE)
+        self.set_center_label(text=center_text, font_size=center_size, **LABEL_OUTLINE)
         self.set_bottom_label(text=bottom_text, font_size=11, **LABEL_OUTLINE)
         return False
 

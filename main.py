@@ -47,6 +47,6 @@ class GrokUsagePlugin(PluginBase):
         self.register(
             plugin_name=self.lm.get("plugin.name"),
             github_repo="https://github.com/ENjxzlt/Grok-Usage-Streamcontroller",
-            plugin_version="1.0.1",
+            plugin_version="1.0.2",
             app_version="1.5.0-beta",
         )
