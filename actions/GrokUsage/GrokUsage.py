@@ -332,15 +332,18 @@ class GrokUsage(ActionBase):
     def get_config_rows(self) -> list:
         settings = self._settings()
 
-        log_path_row = Adw.EntryRow(
-            title=self.tr("grok-usage.log-path.title"), subtitle=self.tr("grok-usage.log-path.subtitle")
-        )
+        # AdwEntryRow (unlike AdwActionRow/AdwComboRow below) has no "subtitle"
+        # property - passing one as a construct kwarg crashes with
+        # "TypeError: gobject 'AdwEntryRow' doesn't support property
+        # 'subtitle'" as soon as the settings panel is opened. Set it as a
+        # tooltip instead so the hint isn't lost entirely.
+        log_path_row = Adw.EntryRow(title=self.tr("grok-usage.log-path.title"))
+        log_path_row.set_tooltip_text(self.tr("grok-usage.log-path.subtitle"))
         log_path_row.set_text(str(settings.get("log_path", DEFAULT_LOG_PATH)))
         log_path_row.connect("notify::text", self._on_log_path_changed)
 
-        sessions_dir_row = Adw.EntryRow(
-            title=self.tr("grok-usage.sessions-dir.title"), subtitle=self.tr("grok-usage.sessions-dir.subtitle")
-        )
+        sessions_dir_row = Adw.EntryRow(title=self.tr("grok-usage.sessions-dir.title"))
+        sessions_dir_row.set_tooltip_text(self.tr("grok-usage.sessions-dir.subtitle"))
         sessions_dir_row.set_text(str(settings.get("sessions_dir", DEFAULT_SESSIONS_DIR)))
         sessions_dir_row.connect("notify::text", self._on_sessions_dir_changed)
 
