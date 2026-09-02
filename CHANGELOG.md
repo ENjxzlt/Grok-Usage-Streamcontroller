@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.3
+
+- Fixed the settings panel crashing on open (`TypeError: gobject 'AdwEntryRow' doesn't support property 'subtitle'`), reported by [@Core447](https://github.com/Core447) while reviewing the StreamController Store submission. `AdwEntryRow` has no `subtitle` property (unlike `AdwActionRow`/`AdwComboRow`, which do) — passing one as a construct argument crashed as soon as the log-path or sessions-directory rows were built. Moved that hint text to a tooltip on each row instead.
+
 ## 1.0.2
 
 Real-world fixes from [@parkour86](https://github.com/parkour86) testing against actual Grok Build/SuperGrok installs ([#3](https://github.com/ENjxzlt/Grok-Usage-Streamcontroller/issues/3), [#4](https://github.com/ENjxzlt/Grok-Usage-Streamcontroller/pull/4), [#5](https://github.com/ENjxzlt/Grok-Usage-Streamcontroller/pull/5), [#6](https://github.com/ENjxzlt/Grok-Usage-Streamcontroller/pull/6)):
